@@ -754,8 +754,9 @@ newhead()
 }
 
 /*
- * compare the given files. returns 0 for identical files, non-zero otherwise.
- * if files are not readable, they are considered to be different.
+ * compare the given files. returns 0 for identical files, and 1 if they are
+ * different. if files are not readable, they are considered to be different,
+ * and -1 is returned.
  */
 static int
 compare(file1, file2)
@@ -781,30 +782,22 @@ char *file1, *file2;
 	/*
 	 * compare the contents of the two files.
 	 */
+	retval = 0;		/* files initially considered identical */
 	do {
 		n1 = read(fd1, buf1, sizeof(buf1));
 		n2 = read(fd2, buf2, sizeof(buf2));
-again:
 		if (n1 != n2) {
-			if (bcmp(buf1, buf2, min(n1, n2)) != 0) {
-				retval = 1;
-				break;
-			}
-			if (n2 > n1) {
-				n1 = read(fd1, buf1, n2 - n1);
-				bcopy(buf2 + n2, buf2, n2 - n1);
-			} else {
-				n2 = read(fd2, buf2, n1 - n2);
-				bcopy(buf1 + n1, buf1, n1 - n2);
-			}
-			goto again;
+			/*
+			 * files must be different sizes.
+			 */
+			retval = 1;
+			break;
 		} else {
 			if (bcmp(buf1, buf2, n1) != 0) {
 				retval = 1;
 				break;
 			}
 		}
-		retval = n1 - n2;
 	} while (n1 > 0 && n2 > 0);
 
 	/*
