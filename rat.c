@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.9 (C.M.Downey) %G%";
+static char *sccsid = "@(#)rat.c	1.10 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -53,6 +53,7 @@ static char *sccsid = "@(#)rat.c	1.9 (C.M.Downey) %G%";
 	-r	recurse down through directories. (careful here)
 	-s	follow symbolic links. (not on pre-4.2) (very careful here)
 	-u	ignore ownership of files.
+	-f file	specify file containing filenames to rationalize; '-' means stdin
 * libraries used:
 	standard
 * environments:
@@ -84,7 +85,7 @@ static char *sccsid = "@(#)rat.c	1.9 (C.M.Downey) %G%";
 /*
  * Symbolic link handling is only available if there are any to handle.
  */
-#define	USAGE	"usage: rat [-vnrsu] files\n"
+#define	USAGE	"usage: rat [-vnrsu] [ file ... | -f listfile ]\n"
 
 
 #define ISDIR		1		/* miscellaneous return values */
@@ -121,6 +122,7 @@ typedef struct header {
  * Internal function declarations.
  */
 static	Head	*associate(int, char **);
+static	Head	*assocfromfile(char *);
 static	Head	*enterdir(char *, Head *);
 static	int	enter(char *, char *, Head **);
 static	Head	*assoc(Head *, Head *);
@@ -175,6 +177,7 @@ main(int argc, char *argv[])
 {
     Head	*list;
     int		count;
+    char	*inputfile = NULL;
 
     progname = argv[0];
 
@@ -207,6 +210,14 @@ main(int argc, char *argv[])
 		ignore = 1;
 		break;
 
+	    case 'f':		/* read list of filenames from file */
+		if (count + 1 < argc) {
+		    inputfile = argv[count + 1];
+		} else {
+		    (void) fputs(USAGE, stderr);
+		}
+		break;
+
 	    case 'd':		/* debug - undocumented */
 		debug = 1;
 		break;
@@ -223,14 +234,14 @@ main(int argc, char *argv[])
      * apply "combine" to each equivalence class in turn.
      * Current directory is default.
      */
-    if (count == argc) {
+    if (inputfile != NULL) {
+        list = assocfromfile(inputfile);
+    } else if (count == argc) {
 	list = associate(1, &dot);
     } else {
 	list = associate(argc - count, argv + count);
     }
-    if (debug) {
-	(void) puts("done associate()");
-    }
+
     while (list != NULL) {
 	combine(list->h_info);
 	list = list->h_next;
@@ -247,9 +258,7 @@ main(int argc, char *argv[])
  * Return the list.
  */
 static Head *
-associate(argc, argv)
-int argc;
-char *argv[];
+associate(int argc, char *argv[])
 {
     register int count;		/* loop counter */
     Head *list = NULL;		/* pointer to linked list */
@@ -267,6 +276,58 @@ char *argv[];
 	    list = enterdir(argv[count], list);
 	}
     }
+
+    return(list);
+}
+
+/*
+ * Associate all files listed within the given filename into
+ * a list of lists of Info. Return the list.
+ */
+static Head *
+assocfromfile(char *filename)
+{
+    FILE	*infile;
+    Head	*list = NULL;		/* pointer to linked list */
+    char	buf[256];
+    int		lineno;
+
+    if (debug) {
+	(void) printf("assocfromfile(%s)", filename);
+    }
+
+    if (strcmp(filename, "-") == 0) {
+        infile = stdin;
+    } else {
+	infile = fopen(filename, "r");
+	if (infile == NULL) {
+	    fatal("Cannot open \"%s\"", filename);
+	}
+    }
+
+    lineno = 1;
+    while (fgets(buf, sizeof(buf), infile) != NULL) {
+
+	char	*s;
+
+	s = strchr(buf, '\n');
+	if (s != NULL) {
+	    *s = '\0';
+	} else {
+	    fatal("Line %d too long in \"%s\"", lineno, filename);
+	}
+	lineno++;
+
+	/*
+	 * If we encounter a directory,
+	 * call enterdir to handle it.
+	 */
+	if (enter(buf, ".", &list) == ISDIR) {
+	    list = enterdir(buf, list);
+	}
+    }
+
+    (void) fclose(infile);
 
     return(list);
 }
