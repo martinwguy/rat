@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.3 1.3 (UKC) %G%";
+static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
 #endif  lint
 
 /***
@@ -306,7 +306,7 @@ head_t *list;
 	register DIR *dirp;		/* open directory pointer */
 	register struct direct *dp;	/* pointer to each directory entry */
 #else	NEWDIR
-	register int fd;		/* descriptor for open directory */
+	register FILE *dirp;		/* descriptor for open directory */
 	struct direct dirbuf;		/* structure for each directory entry */
 	register struct direct *dp = &dirbuf;	/* pointer to dirbuf */
 #endif	NEWDIR
@@ -319,10 +319,11 @@ head_t *list;
 	 * open the directory.
 	 */
 #ifdef	NEWDIR
-	if ((dirp = opendir(dirname)) == NULL) {
+	dirp = opendir(dirname);
 #else	NEWDIR
-	if ((fd = open(dirname, O_RDONLY)) == -1) {
+	dirp = fopen(dirname, "r");
 #endif	NEWDIR
+	if (dirp == NULL) {
 		error(1, "cannot open directory %s", dirname);
 		return(list);
 	}
@@ -333,7 +334,7 @@ head_t *list;
 #ifdef	NEWDIR
 	while ((dp = readdir(dirp)) != NULL) {
 #else	NEWDIR
-	while (read(fd, (char *) &dirbuf, sizeof(dirbuf)) > 0) {
+	while (fread((char *) &dirbuf, sizeof(dirbuf), 1, dirp) == 1) {
 		if (dirbuf.d_ino == 0)		/* slot not in use */
 			continue;
 #endif	NEWDIR
@@ -357,7 +358,7 @@ head_t *list;
 #ifdef	NEWDIR
 	(void) closedir(dirp);
 #else	NEWDIR
-	(void) close(fd);
+	(void) fclose(dirp);
 #endif	NEWDIR
 
 	return(list);
