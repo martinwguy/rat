@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.8 (C.M.Downey) %G%";
+static char *sccsid = "@(#)rat.c	1.9 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -56,63 +56,40 @@ static char *sccsid = "@(#)rat.c	1.8 (C.M.Downey) %G%";
 * libraries used:
 	standard
 * environments:
-	Berkeley VAX 4.2BSD VMUNIX.
-	Berkeley Orion 4.1BSD VMUNIX.
+	(Berkeley VAX 4.2BSD VMUNIX)
+	(Berkeley Orion 4.1BSD VMUNIX)
+	Sun Solaris 5.5.1
 * history:
 	Chris Downey UKC August 1985
+	Solaris port cmd Pfizer CR Sandwich 1/5/98
 
 ***/
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>			/* for off_t etc. */
+#include <unistd.h>			/* for uid_t etc. */
 #include <sys/stat.h>			/* for file sizes etc. */
 #include <sys/file.h>			/* for opening files */
+#include <fcntl.h>			/* for opening files */
 #include <errno.h>			/* for error messages */
+#include <stdarg.h>
 
 /*
- * Define NEWDIR if we have the new (4.2-style) directory-handling stuff.
- * otherwise, undefine NEWDIR so that the function enterdir() will use
- * the original unix directory structure.
- *
- * SunOS 3.5 apparently defines DIRSIZ instead of DIRBLKSIZ, so we
- * test for either of these to see if we have the new dir stuff.
+ * This code ported to POSIX from ancient BSD-style cmd Pfizer Sandwich 1/5/98.
  */
-#include <sys/dir.h>
-
-#if	defined(DIRBLKSIZ) || defined(DIRSIZ)
-#	define	NEWDIR
-#else	DIRBLKSIZ
-#	undef	NEWDIR
-#endif	DIRBLKSIZ
-
-
-/*
- * If O_RDONLY isn't defined, we assume this is a pre-4.2 system.
- * we will therefore need our own bcmp() and rename() library functions.
- */
-#ifndef	O_RDONLY
-#	define	O_RDONLY	0
-#	define	BCMP
-#	define	RENAME
-#else	O_RDONLY
-#	undef	BCMP
-#	undef	RENAME
-#endif	O_RDONLY
-
+#include <dirent.h>
 
 /*
  * Symbolic link handling is only available if there are any to handle.
  */
-#ifdef	S_IFLNK
-#	define	USAGE	"usage: rat [-vnrsu] files\n"
-#else	S_IFLNK
-#	define	USAGE	"usage: rat [-vnru] files\n"
-#endif	S_IFLNK
+#define	USAGE	"usage: rat [-vnrsu] files\n"
 
 
-#define ISDIR	1			/* miscellaneous return values */
-#define NOTDIR	0
-#define NOFILE	-1
+#define ISDIR		1		/* miscellaneous return values */
+#define NOTDIR		0
+#define NOSUCHFILE	-1
 
 #define	min(a, b)	((a) < (b) ? (a) : (b))
 
@@ -137,42 +114,37 @@ typedef struct header {
 	Info		*h_info;	/* pointer to list of files */
 	off_t		h_size;		/* size of files */
 	dev_t		h_dev;		/* device number */
-	int		h_uid;		/* ownership */
+	uid_t		h_uid;		/* ownership */
 } Head;
 
 /*
  * Internal function declarations.
  */
-static	Head	*associate();
-static	Head	*assoc();
-static	int	enter();
-static	int	newinfo();
-static	Head	*enterdir();
-static	Head	*newhead();
+static	Head	*associate(int, char **);
+static	Head	*enterdir(char *, Head *);
+static	int	enter(char *, char *, Head **);
+static	Head	*assoc(Head *, Head *);
+static	int	newinfo(char *, char *, Head *);
+static	Head	*newhead(void);
 
-static	void	combine();
-static	Info	*comb2();
-static	int	compare();
-static	int	replace();
-static	int	replace2();
+static	void	combine(Info *);
+static	Info	*comb2(Info *, Info *);
+static	int	compare(char *, char *);
+static	int	replace(Info *, Info *);
+static	int	replace2(char *, char *);
 
-static	void	raisepriority();
-static	void	lowerpriority();
+static	void	raisepriority(void);
+static	void	lowerpriority(void);
 
-static	char	*mkpath();
-static	void	error();
-static	void	fatal();
-
-/*
- * Library function declarations.
- */
-extern	char	*malloc();
-extern	char	*strcpy();
+static	char	*mkpath(char *, char *);
+static	void	error(int, char *, ...);
+static	void	verror(int, char *, va_list);
+static	void	fatal(char *, ...);
 
 /*
  * Name of program, for printing error messages.
  */
-char	*progname;
+static	char	*progname;
 
 /*
  * Stuff for raising and lowering priority.
@@ -180,7 +152,7 @@ char	*progname;
 #define	PRIORITY	-5		/* how much to raise priority by */
 
 static	int	niceness = 0;		/* current priority */
-static	int	our_uid = -1;		/* our user id */
+static	uid_t	our_uid = -1;		/* our user id */
 
 /*
  * Global option variables.
@@ -191,84 +163,83 @@ static	int	recursive = 0;		/* recurse down through directories */
 static	int	ignore = 0;		/* ignore ownership of files */
 static	int	debug = 0;		/* debugging level */
 
-#ifdef	S_IFLNK
 static	int	symbolic = 0;		/* follow symlinks to directories */
-#endif	S_IFLNK
 
 /*
  * Default directory if no files given.
  */
 static	char	*dot = ".";
 
-main(argc, argv)
-int argc;
-char *argv[];
+int
+main(int argc, char *argv[])
 {
-	register Head *list;
+    Head	*list;
+    int		count;
 
-	progname = argv[0];
+    progname = argv[0];
 
-	/*
-	 * parse option flags.
-	 */
-	for (argv++, argc--; argv[0][0] == '-'; argv++, argc--) {
-		register int i;
+    /*
+     * parse option flags.
+     */
+    for (count = 1; count < argc && argv[count][0] == '-'; count++) {
+	int i;
 
-		for (i = 1; argv[0][i] != '\0'; i++) {
-			switch (argv[0][i]) {
-			case 'v':		/* say what we are doing */
-				verbose = 1;
-				break;
+	for (i = 1; argv[count][i] != '\0'; i++) {
+	    switch (argv[count][i]) {
+	    case 'v':		/* say what we are doing */
+		verbose = 1;
+		break;
 
-			case 'n':		/* don't do anything */
-				noexec = 1;
-				verbose = 1;
-				break;
+	    case 'n':		/* don't do anything */
+		noexec = 1;
+		verbose = 1;
+		break;
 
-			case 'r':		/* recursive mode */
-				recursive = 1;
-				break;
+	    case 'r':		/* recursive mode */
+		recursive = 1;
+		break;
 
-#ifdef	S_IFLNK
-			case 's':		/* follow symlinks (4.2 only) */
-				symbolic = 1;
-				break;
-#endif	S_IFLNK
+	    case 's':		/* follow symlinks */
+		symbolic = 1;
+		break;
 
-			case 'u':		/* ignore ownership info */
-				ignore = 1;
-				break;
+	    case 'u':		/* ignore ownership info */
+		ignore = 1;
+		break;
 
-			case 'd':		/* debug - undocumented */
-				debug = 1;
-				break;
+	    case 'd':		/* debug - undocumented */
+		debug = 1;
+		break;
 
-			default:
-				fputs(USAGE, stderr);
-				exit(1);
-			}
-		}
+	    default:
+		(void) fputs(USAGE, stderr);
+		exit(1);
+	    }
 	}
+    }
 
-	/*
-	 * Read all the files into an associativity list, and then
-	 * apply "combine" to each equivalence class in turn.
-	 * Current directory is default.
-	 */
-	if (argc == 0) {
-		list = associate(1, &dot);
-	} else {
-		list = associate(argc, argv);
-	}
-	while (list != NULL) {
-		combine(list->h_info);
-		list = list->h_next;
-	}
+    /*
+     * Read all the files into an associativity list, and then
+     * apply "combine" to each equivalence class in turn.
+     * Current directory is default.
+     */
+    if (count == argc) {
+	list = associate(1, &dot);
+    } else {
+	list = associate(argc - count, argv + count);
+    }
+    if (debug) {
+	(void) puts("done associate()");
+    }
+    while (list != NULL) {
+	combine(list->h_info);
+	list = list->h_next;
+    }
 
-	/*
-	 * We always exit successfully at the moment. (if we get here).
-	 */
-	exit(0);
+    /*
+     * We always exit successfully at the moment. (if we get here).
+     */
+    return(0);
 }
 
 /*
@@ -280,24 +251,24 @@ associate(argc, argv)
 int argc;
 char *argv[];
 {
-	register int count;		/* loop counter */
-	Head *list = NULL;		/* pointer to linked list */
+    register int count;		/* loop counter */
+    Head *list = NULL;		/* pointer to linked list */
 
-	if (debug) {
-		puts("associate");
+    if (debug) {
+	(void) puts("associate");
+    }
+
+    for (count = 0; count < argc; count++) {
+	/*
+	 * If we encounter a directory,
+	 * call enterdir to handle it.
+	 */
+	if (enter(argv[count], ".", &list) == ISDIR) {
+	    list = enterdir(argv[count], list);
 	}
+    }
 
-	for (count = 0; count < argc; count++) {
-		/*
-		 * If we encounter a directory,
-		 * call enterdir to handle it.
-		 */
-		if (enter(argv[count], ".", &list) == ISDIR) {
-			list = enterdir(argv[count], list);
-		}
-	}
-
-	return(list);
+    return(list);
 }
 
 /*
@@ -310,27 +281,17 @@ enterdir(dirname, list)
 char *dirname;
 Head *list;
 {
-#ifdef	NEWDIR
-	register DIR *dirp;		/* open directory pointer */
-	register struct direct *dp;	/* pointer to each directory entry */
-#else	NEWDIR
-	register FILE *dirp;		/* descriptor for open directory */
-	struct direct dirbuf;		/* structure for each directory entry */
-	register struct direct *dp = &dirbuf;	/* pointer to dirbuf */
-#endif	NEWDIR
+	DIR *dirp;		/* open directory pointer */
+	struct dirent *dp;	/* pointer to each directory entry */
 
 	if (debug) {
-		printf("enterdir(%s)\n", dirname);
+		(void) printf("enterdir(%s)\n", dirname);
 	}
 
 	/*
 	 * Open the directory.
 	 */
-#ifdef	NEWDIR
 	dirp = opendir(dirname);
-#else	NEWDIR
-	dirp = fopen(dirname, "r");
-#endif	NEWDIR
 	if (dirp == NULL) {
 		error(1, "cannot open directory %s", dirname);
 		return(list);
@@ -339,13 +300,7 @@ Head *list;
 	/*
 	 * Search the directory, ignoring only "." and "..".
 	 */
-#ifdef	NEWDIR
 	while ((dp = readdir(dirp)) != NULL) {
-#else	NEWDIR
-	while (fread((char *) &dirbuf, sizeof(dirbuf), 1, dirp) == 1) {
-		if (dirbuf.d_ino == 0)		/* slot not in use */
-			continue;
-#endif	NEWDIR
 		if (strcmp(dp->d_name, ".") == 0
 		  || strcmp(dp->d_name, "..") == 0) {
 			continue;		/* skip self and parent */
@@ -363,11 +318,7 @@ Head *list;
 	/*
 	 * Close the directory.
 	 */
-#ifdef	NEWDIR
 	(void) closedir(dirp);
-#else	NEWDIR
-	(void) fclose(dirp);
-#endif	NEWDIR
 
 	return(list);
 }
@@ -389,7 +340,7 @@ Head **listp;
 	Head head;
 
 	if (debug) {
-		printf("enter(%s, %s)\n", filename, directory);
+		(void) printf("enter(%s, %s)\n", filename, directory);
 	}
 
 	/*
@@ -397,7 +348,7 @@ Head **listp;
 	 * indicate that it is.
 	 */
 	switch (newinfo(filename, directory, &head)) {
-	case NOFILE:
+	case NOSUCHFILE:
 		return(NOTDIR);
 	case ISDIR:
 		return(ISDIR);
@@ -424,7 +375,7 @@ Head *list;				/* list to put it in */
 	register Head *hptr;		/* temp header structure */
 
 	if (debug) {
-		puts("assoc");
+		(void) puts("assoc");
 	}
 
 	for (listp = list; listp != NULL; listp = listp->h_next) {
@@ -437,7 +388,7 @@ Head *list;				/* list to put it in */
 		    (ignore || hp->h_uid == listp->h_uid)) {
 
 			if (debug) {
-				printf("associating %s with %s\n",
+				(void) printf("associating %s with %s\n",
 							listp->h_info->i_name,
 							hp->h_info->i_name);
 			}
@@ -468,10 +419,10 @@ Head *list;				/* list to put it in */
  */
 static void
 combine(list)
-register Info *list;
+Info *list;
 {
 	if (debug) {
-		puts("combine");
+		(void) puts("combine");
 	}
 
 	while (list != NULL && list->i_next != NULL) {
@@ -488,14 +439,14 @@ register Info *list;
  */
 static Info *
 comb2(elem, ilist)
-register Info *elem;
-register Info *ilist;
+Info *elem;
+Info *ilist;
 {
 	if (ilist == NULL)
 		return(NULL);
 
 	if (debug) {
-		printf("comb2 \"%s\" \"%s\"\n", elem->i_name, ilist->i_name);
+		(void) printf("comb2 \"%s\" \"%s\"\n", elem->i_name, ilist->i_name);
 	}
 
 	if (replace(elem, ilist)) {
@@ -524,11 +475,11 @@ register Info *ilist;
  */
 static int
 replace(a, b)
-register Info *a;
-register Info *b;
+Info *a;
+Info *b;
 {
 	if (debug) {
-		puts("replace");
+		(void) puts("replace");
 	}
 
 	/*
@@ -575,14 +526,14 @@ char *from, *to;
 	time_t clock;			/* time for temp file name */
 
 	if (debug) {
-		printf("replace2(%s, %s)\n", from, to);
+		(void) printf("replace2(%s, %s)\n", from, to);
 	}
 
 	/*
 	 * If -n has been given, just print commands.
 	 */
 	if (noexec) {
-		printf("link %s to %s\n", to, from);
+		(void) printf("link %s to %s\n", to, from);
 		return(1);
 	}
 
@@ -590,11 +541,12 @@ char *from, *to;
 	 * Before we throw "to" away, relink it to a temporary file.
 	 */
 	(void) time(&clock);
-	(void) sprintf(newname, "%s%4.4x%4.4x", to, getpid()&0xffff,
-							  clock&0xffff);
+	(void) sprintf(newname, "%s%4.4x%4.4x", to,
+						(unsigned) (getpid() & 0xffff),
+						(unsigned) clock & 0xffff);
 
 	if (debug) {
-		puts("replace2 - creating save file");
+		(void) puts("replace2 - creating save file");
 	}
 
 	/*
@@ -616,7 +568,7 @@ char *from, *to;
 	 * Now try and link them together.
 	 */
 	if (debug) {
-		puts("replace2 - linking");
+		(void) puts("replace2 - linking");
 	}
 
 	if (link(from, to) == -1) {
@@ -649,7 +601,7 @@ char *from, *to;
 	 * Only print out what we are doing when we have succeeded.
 	 */
 	if (verbose) {
-		printf("linking %s to %s\n", to, from);
+		(void) printf("linking %s to %s\n", to, from);
 	}
 
 	return(1);
@@ -661,7 +613,7 @@ char *from, *to;
  * the filename and inode number.
  * If file is a symbolic link, only follow it if it is a file,
  * or if it is a directory and the -s flag has been given.
- * Returns NOFILE, ISDIR or NOTDIR as appropriate.
+ * Returns NOSUCHFILE, ISDIR or NOTDIR as appropriate.
  */
 static int
 newinfo(filename, directory, headerp)
@@ -674,7 +626,7 @@ register Head *headerp;
 	register char *cp;
 
 	if (debug) {
-		printf("newinfo(%s, %s)\n", filename, directory);
+		(void) printf("newinfo(%s, %s)\n", filename, directory);
 	}
 
 	cp = mkpath(directory, filename);
@@ -682,57 +634,51 @@ register Head *headerp;
 	/*
 	 * if the file does not exist, ignore it.
 	 */
-#ifdef	S_IFLNK
 	if (lstat(cp, &stbuf) == -1) {
-#else	S_IFLNK
-	if (stat(cp, &stbuf) == -1) {
-#endif	S_IFLNK
-		(void) free(cp);
-		return(NOFILE);
+		free(cp);
+		return(NOSUCHFILE);
 	}
 	
 	/*
 	 * ignore directories and special files - we can't rationalise them.
 	 */
 	switch (stbuf.st_mode & S_IFMT) {
-#ifdef	S_IFLNK
 	case S_IFLNK:
 		/*
 		 * handle symlinks; first stat what it points to.
 		 */
 		if (!symbolic) {
-			return(NOFILE);
+			return(NOSUCHFILE);
 		}
 
 		if (stat(cp, &stbuf) == -1) {
-			(void) free(cp);
-			return(NOFILE);		/* nothing to point to */
+			free(cp);
+			return(NOSUCHFILE);		/* nothing to point to */
 		}
 
 		switch (stbuf.st_mode & S_IFMT) {
 		case S_IFDIR:			/* symlink to directory */
-			(void) free(cp);
+			free(cp);
 			return(ISDIR);
 			/*NOTREACHED*/
 		case S_IFREG:			/* symlink to regular file */
 			break;
 		default:			/* symlink to special file */
-			(void) free(cp);
-			return(NOFILE);
+			free(cp);
+			return(NOSUCHFILE);
 		}
 		break;
 
-#endif	S_IFLNK
 	case S_IFDIR:				/* directory */
-		(void) free(cp);
+		free(cp);
 		return(ISDIR);
 
 	case S_IFREG:				/* a regular file */
 		break;
 
 	default:				/* special file */
-		(void) free(cp);
-		return(NOFILE);
+		free(cp);
+		return(NOSUCHFILE);
 	}
 
 	/*
@@ -815,7 +761,7 @@ char *file1, *file2;
 			retval = 1;
 			break;
 		} else {
-			if (bcmp(buf1, buf2, n1) != 0) {
+			if (memcmp(buf1, buf2, n1) != 0) {
 				retval = 1;
 				break;
 			}
@@ -855,7 +801,7 @@ static void
 lowerpriority()
 {
 	if (our_uid == 0) {
-		nice(-niceness);
+		(void) nice(-niceness);
 		niceness = 0;
 	}
 }
@@ -869,7 +815,7 @@ char *dir, *file;
 {
 	register char *cp;		/* temp char pointer */
 	register int opt = 0;		/* special case for a == "." */
-	register int size;		/* number of bytes needed */
+	register unsigned size;		/* number of bytes needed */
 
 	/*
 	 * if dir is "." or file begins with a slash, just use filename.
@@ -908,76 +854,53 @@ char *dir, *file;
  *
  * the system error message is only printed if the first argument is non-zero.
  */
-/*VARARGS1*/
-/*PRINTFLIKE*/
 static void
-error(syserr, string, a, b, c, d, e)
-int syserr;
-char *string;
-char *a, *b, *c, *d, *e;
+error(int syserr, char *str, ...)
 {
-	register char *s;
-	extern int errno;
-	extern int sys_nerr;
-	extern char *sys_errlist[];
+	va_list ap;
+
+	va_start(ap, str);
+	verror(syserr, str, ap);
+	va_end(ap);
+}
+
+/*
+ * print an error message on stderr, consisting of:
+ *
+ *	<progname>: <message> [system error message]\n
+ *
+ * the system error message is only printed if the first argument is non-zero.
+ */
+static void
+verror(int syserr, char *string, va_list ap)
+{
+	char	errstr[64];
 
 	/*
-	 * we must get the system error message first, as fprintf may change it.
+	 * Get the error string first, in case it gets changed by fprintf().
 	 */
-	if (syserr) {
-		s = (errno > sys_nerr) ? "Unknown error" : sys_errlist[errno];
-	}
+	(void) strncpy(errstr, strerror(errno), sizeof(errstr));
 
-	fprintf(stderr, "%s: ", progname);
-	fprintf(stderr, string, a, b, c, d, e);
+	(void) fprintf(stderr, "%s: ", progname);
+	(void) vfprintf(stderr, string, ap);
 
 	if (syserr) {
-		fprintf(stderr, " [%s]\n", s);
-	} else {
-		putc('\n', stderr);
+		(void) fprintf(stderr, " [%s]", errstr);
 	}
+	(void) putc('\n', stderr);
 }
 
 /*
  * print an error message and die.
  */
-/*VARARGS1*/
-/*PRINTFLIKE*/
 static void
-fatal(string, a, b, c, d, e)
-char *string;
-char *a, *b, *c, *d, *e;
+fatal(char *string, ...)
 {
-	error(1, string, a, b, c, d, e);
-	exit(-1);
-}
+	va_list	ap;
 
-#ifdef	BCMP
-/*
- * byte compare - return zero for identical buffers, non-zero otherwise.
- */
-int
-bcmp(c1, c2, n)
-register char *c1, *c2;
-register int n;
-{
-	while (n > 0 && *c1++ == *c2++)
-		--n;
-	return(n);
-}
-#endif	BCMP
+	va_start(ap, string);
+	verror(1, string, ap);
+	va_end(ap);
 
-/*
- * rename file "from" to "to".
- */
-#ifdef	RENAME
-int
-rename(from, to)
-char *from, *to;
-{
-	if (link(from, to) == -1) {
-		return(-1);
-	}
-	return(unlink(from));
+	exit(1);
 }
-#endif	RENAME
