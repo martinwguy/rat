@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
+static char *sccsid = "@(#)rat.c	1.7 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -70,7 +70,7 @@ static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
 #include <errno.h>			/* for error messages */
 
 /*
- * define NEWDIR if we have the new (4.2-style) directory-handling stuff.
+ * Define NEWDIR if we have the new (4.2-style) directory-handling stuff.
  * otherwise, undefine NEWDIR so that the function enterdir() will use
  * the original unix directory structure.
  */
@@ -84,7 +84,7 @@ static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
 
 
 /*
- * if O_RDONLY isn't defined, we assume this is a pre-4.2 system.
+ * If O_RDONLY isn't defined, we assume this is a pre-4.2 system.
  * we will therefore need our own bcmp() and rename() library functions.
  */
 #ifndef	O_RDONLY
@@ -98,7 +98,7 @@ static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
 
 
 /*
- * symbolic link handling is only available if there are any to handle.
+ * Symbolic link handling is only available if there are any to handle.
  */
 #ifdef	S_IFLNK
 #	define	USAGE	"usage: rat [-vnrsu] files\n"
@@ -111,47 +111,44 @@ static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
 #define NOTDIR	0
 #define NOFILE	-1
 
-
 #define	min(a, b)	((a) < (b) ? (a) : (b))
 
 
 /*
- * each file is described by the following structure, which is
- * a member of a linked list pointed to by head_t.
+ * Each file is described by the following structure, which is
+ * a member of a linked list pointed to by a "Head" structure.
  */
 typedef struct info {
-	struct info *i_next;		/* pointer to next object */
-	char *i_name;			/* pointer to file name */
-	char *i_dir;			/* pointer to directory */
-	ino_t i_ino;			/* inode number */
-} info_t;
+	struct info	*i_next;	/* pointer to next object */
+	char		*i_name;	/* pointer to file name */
+	char		*i_dir;		/* pointer to directory */
+	ino_t		i_ino;		/* inode number */
+} Info;
 
 /*
- * head_t describes a list of associated files, pointed to by h_info,
+ * Head describes a list of associated files, pointed to by h_info,
  * together with common information.
  */
 typedef struct header {
-	struct	header *h_next;		/* pointer to next object */
-	info_t	*h_info;		/* pointer to list of files */
-	off_t	h_size;			/* size of files */
-	dev_t	h_dev;			/* device number */
-	short	h_uid;			/* ownership */
-} head_t;
+	struct header	*h_next;	/* pointer to next object */
+	Info		*h_info;	/* pointer to list of files */
+	off_t		h_size;		/* size of files */
+	dev_t		h_dev;		/* device number */
+	int		h_uid;		/* ownership */
+} Head;
 
 /*
- * internal function declarations.
+ * Internal function declarations.
  */
-static	void	apply();
-
-static	head_t	*associate();
-static	head_t	*assoc();
+static	Head	*associate();
+static	Head	*assoc();
 static	int	enter();
 static	int	newinfo();
-static	head_t	*enterdir();
-static	head_t	*newhead();
+static	Head	*enterdir();
+static	Head	*newhead();
 
 static	void	combine();
-static	info_t	*comb2();
+static	Info	*comb2();
 static	int	compare();
 static	int	replace();
 static	int	replace2();
@@ -164,18 +161,18 @@ static	void	error();
 static	void	fatal();
 
 /*
- * library function declarations.
+ * Library function declarations.
  */
 extern	char	*malloc();
 extern	char	*strcpy();
 
 /*
- * name of program, for printing error messages.
+ * Name of program, for printing error messages.
  */
 char	*progname;
 
 /*
- * stuff for raising and lowering priority.
+ * Stuff for raising and lowering priority.
  */
 #define	PRIORITY	-5		/* how much to raise priority by */
 
@@ -183,24 +180,28 @@ static	int	niceness = 0;		/* current priority */
 static	int	our_uid = -1;		/* our user id */
 
 /*
- * global option variables.
+ * Global option variables.
  */
 static	int	verbose = 0;		/* print names of files rationalised */
 static	int	noexec = 0;		/* don't actually do anything */
 static	int	recursive = 0;		/* recurse down through directories */
-#ifdef	S_IFLNK
-static	int	symbolic = 0;		/* follow symlinks to directories */
-#endif	S_IFLNK
 static	int	ignore = 0;		/* ignore ownership of files */
 static	int	debug = 0;		/* debugging level */
 
-static	char	*dot = ".";		/* default if no files given */
+#ifdef	S_IFLNK
+static	int	symbolic = 0;		/* follow symlinks to directories */
+#endif	S_IFLNK
+
+/*
+ * Default directory if no files given.
+ */
+static	char	*dot = ".";
 
 main(argc, argv)
 int argc;
 char *argv[];
 {
-	register int i;			/* loop counter */
+	register Head *list;
 
 	progname = argv[0];
 
@@ -208,29 +209,37 @@ char *argv[];
 	 * parse option flags.
 	 */
 	for (argv++, argc--; argv[0][0] == '-'; argv++, argc--) {
+		register int i;
+
 		for (i = 1; argv[0][i] != '\0'; i++) {
 			switch (argv[0][i]) {
 			case 'v':		/* say what we are doing */
 				verbose = 1;
 				break;
+
 			case 'n':		/* don't do anything */
 				noexec = 1;
 				verbose = 1;
 				break;
+
 			case 'r':		/* recursive mode */
 				recursive = 1;
 				break;
+
 #ifdef	S_IFLNK
 			case 's':		/* follow symlinks (4.2 only) */
 				symbolic = 1;
 				break;
 #endif	S_IFLNK
+
 			case 'u':		/* ignore ownership info */
 				ignore = 1;
 				break;
+
 			case 'd':		/* debug - undocumented */
 				debug = 1;
 				break;
+
 			default:
 				fputs(USAGE, stderr);
 				exit(1);
@@ -239,57 +248,37 @@ char *argv[];
 	}
 
 	/*
-	 * read all the files into an associativity list, and then
+	 * Read all the files into an associativity list, and then
 	 * apply "combine" to each equivalence class in turn.
-	 * current directory is default.
+	 * Current directory is default.
 	 */
-	{
-		register head_t *list;
-
-		if (argc == 0) {
-			list = associate(1, &dot);
-		} else {
-			list = associate(argc, argv);
-		}
-		apply(combine, list);
+	if (argc == 0) {
+		list = associate(1, &dot);
+	} else {
+		list = associate(argc, argv);
+	}
+	while (list != NULL) {
+		combine(list->h_info);
+		list = list->h_next;
 	}
 
 	/*
-	 * we always exit successfully at the moment. (if we get here).
+	 * We always exit successfully at the moment. (if we get here).
 	 */
 	exit(0);
 }
 
 /*
- * apply the given function to each equivalence class in the given list.
- * this is like "map", but using side-effects.
+ * Associate the given vector of filenames into a list of lists of Info.
+ * Return the list.
  */
-static void
-apply(func, list)
-register void (*func)();		/* function to apply */
-register head_t *list;			/* list to be operated on */
-{
-	if (debug) {
-		puts("apply");
-	}
-
-	while (list != NULL) {
-		(*func)(list->h_info);
-		list = list->h_next;
-	}
-}
-
-/*
- * associate the given vector of filenames into a list of lists of info_t.
- * return the list.
- */
-static head_t *
+static Head *
 associate(argc, argv)
 int argc;
 char *argv[];
 {
 	register int count;		/* loop counter */
-	head_t *list = NULL;		/* pointer to linked list */
+	Head *list = NULL;		/* pointer to linked list */
 
 	if (debug) {
 		puts("associate");
@@ -297,7 +286,7 @@ char *argv[];
 
 	for (count = 0; count < argc; count++) {
 		/*
-		 * if we encounter a directory,
+		 * If we encounter a directory,
 		 * call enterdir to handle it.
 		 */
 		if (enter(argv[count], ".", &list) == ISDIR) {
@@ -309,14 +298,14 @@ char *argv[];
 }
 
 /*
- * given a directory name and a linked list, add the files within
- * the directory to the list, and return the new list.
- * recurse if directories are encountered and "-r" has been given.
+ * Given a directory name and a linked list, add the files
+ * within the directory to the list, and return the new list.
+ * Recurse if directories are encountered and "-r" has been given.
  */
-static head_t *
+static Head *
 enterdir(dirname, list)
 char *dirname;
-head_t *list;
+Head *list;
 {
 #ifdef	NEWDIR
 	register DIR *dirp;		/* open directory pointer */
@@ -332,7 +321,7 @@ head_t *list;
 	}
 
 	/*
-	 * open the directory.
+	 * Open the directory.
 	 */
 #ifdef	NEWDIR
 	dirp = opendir(dirname);
@@ -345,7 +334,7 @@ head_t *list;
 	}
 
 	/*
-	 * search the directory, ignoring only "." and "..".
+	 * Search the directory, ignoring only "." and "..".
 	 */
 #ifdef	NEWDIR
 	while ((dp = readdir(dirp)) != NULL) {
@@ -360,7 +349,7 @@ head_t *list;
 		}
 
 		/*
-		 * if we encounter a directory, ignore it,
+		 * If we encounter a directory, ignore it,
 		 * unless the -r flag has been given.
 		 */
 		if (enter(dp->d_name, dirname, &list) == ISDIR && recursive) {
@@ -369,7 +358,7 @@ head_t *list;
 	}
 
 	/*
-	 * close the directory.
+	 * Close the directory.
 	 */
 #ifdef	NEWDIR
 	(void) closedir(dirp);
@@ -381,27 +370,27 @@ head_t *list;
 }
 
 /*
- * enter the file in the given associativity list.
- * a file may be entered in an existing class only
+ * Enter the file in the given associativity list.
+ * A file may be entered in an existing class only
  * if its size, device number and ownership are the same.
- * returns ISDIR if a directory is encountered, and
- * NOTDIR for successfully entered files.
- * side-effects *listp.	(NASTY).
+ * Returns ISDIR if a directory is encountered,
+ * and NOTDIR for successfully entered files.
+ * Side-effects *listp.	(NASTY).
  */
 static int
 enter(filename, directory, listp)
 char *filename;
 char *directory;
-head_t **listp;
+Head **listp;
 {
-	head_t head;
+	Head head;
 
 	if (debug) {
 		printf("enter(%s, %s)\n", filename, directory);
 	}
 
 	/*
-	 * if the file does not exist, ignore it; if it is a directory,
+	 * If the file does not exist, ignore it; if it is a directory,
 	 * indicate that it is.
 	 */
 	switch (newinfo(filename, directory, &head)) {
@@ -417,108 +406,93 @@ head_t **listp;
 }
 
 /*
- * given a reference to a file, and an associativity list, enter the
- * file in an appropriate equivalence class.
+ * Given a reference to a file, and an associativity list,
+ * enter the file in an appropriate equivalence class.
  *
- * we have to return the list we are given, in case it is empty to
- * start with and we create a new element.
+ * We have to return the list we are given, in case it is
+ * empty to start with and we create a new element.
  */
-static head_t *
+static Head *
 assoc(hp, list)
-head_t *hp;				/* file to be entered */
-head_t *list;				/* list to put it in */
+Head *hp;				/* file to be entered */
+Head *list;				/* list to put it in */
 {
-	register head_t *hptr;		/* temp header structure */
+	register Head *listp;		/* current list element */
+	register Head *hptr;		/* temp header structure */
 
 	if (debug) {
 		puts("assoc");
 	}
 
-	/*
-	 * if list is empty, fill in the first member and return.
-	 * all elements are initialised, including h_next, since
-	 * this *must* be zero.
-	 */
-	if (list == NULL) {
-		hptr = newhead();	/* NASTY */
-		hptr->h_info = hp->h_info;
-		hptr->h_size = hp->h_size;
-		hptr->h_dev = hp->h_dev;
-		hptr->h_uid = hp->h_uid;
-		hptr->h_next = NULL;
-		return(hptr);
-	}
-
-	/*
-	 * if the file will fit into this class, insert it and return list.
-	 */
-	if (hp->h_size == list->h_size &&
-	     hp->h_dev == list->h_dev &&
-	    (ignore || hp->h_uid == list->h_uid)) {
-		if (debug) {
-			printf("associating %s with %s\n",
-						list->h_info->i_name,
-						hp->h_info->i_name);
-		}
-		hp->h_info->i_next = list->h_info;
-		list->h_info = hp->h_info;
-	} else {
+	for (listp = list; listp != NULL; listp = listp->h_next) {
 		/*
-		 * otherwise, recurse.
+		 * If the file will fit into this class,
+		 * insert it and return list.
 		 */
-		list->h_next = assoc(hp, list->h_next);
+		if (hp->h_size == listp->h_size &&
+		     hp->h_dev == listp->h_dev &&
+		    (ignore || hp->h_uid == listp->h_uid)) {
+
+			if (debug) {
+				printf("associating %s with %s\n",
+							listp->h_info->i_name,
+							hp->h_info->i_name);
+			}
+
+			hp->h_info->i_next = listp->h_info;
+			listp->h_info = hp->h_info;
+			return(list);
+		}
 	}
 
-	return(list);
+	/*
+	 * If we have not found an appropriate class into which
+	 * this file may be inserted, push a new element on to
+	 * the head of the list.
+	 */
+	hptr = newhead();
+	hptr->h_info = hp->h_info;
+	hptr->h_size = hp->h_size;
+	hptr->h_dev = hp->h_dev;
+	hptr->h_uid = hp->h_uid;
+	hptr->h_next = list;
+	return(hptr);
 }
 
 /*
- * given an equivalence list, combine together all files which are identical.
- *
- * combine [] = undef
- * combine list = tillempty comb2 list
- *                where
- *                tillempty f x = fx, fx = []
- *                              = tillempty f fx
- *                                where
- *                                fx = f x
- *
- * i.e. keep doing comb2 a x until the result is empty.
+ * Given an equivalence list,
+ * combine together all files which are identical.
  */
 static void
 combine(list)
-register info_t *list;
+register Info *list;
 {
 	if (debug) {
 		puts("combine");
 	}
 
-	if (list == NULL)
-		return;
-
-	do {
+	while (list != NULL && list->i_next != NULL) {
 		list = comb2(list, list->i_next);
-	} while (list != NULL);
+	}
 }
 
 /*
- * attempt to combine the file given with each file in the given list.
+ * Attempt to combine the file given with each file in the given list.
  *
  * comb2 a [] = []
  * comb2 a (b:x) = comb2 a x, replace a b
  *                 b:(comb2 a x)
  */
-static info_t *
+static Info *
 comb2(elem, ilist)
-register info_t *elem;
-register info_t *ilist;
+register Info *elem;
+register Info *ilist;
 {
-	if (debug) {
-		puts("comb2");
-	}
-
-	if (ilist == NULL) {
+	if (ilist == NULL)
 		return(NULL);
+
+	if (debug) {
+		printf("comb2 \"%s\" \"%s\"\n", elem->i_name, ilist->i_name);
 	}
 
 	if (replace(elem, ilist)) {
@@ -531,12 +505,14 @@ register info_t *ilist;
 }
 
 /*
- * given two files, decide if they are identical, and if so, try and replace
- * one with a link to the other. we don't have to worry about ownership at
- * this stage, as this should already have been decided.
+ * Given two files, decide if they are identical,
+ * and if so, try and replace one with a link to the other.
+ * we don't have to worry about ownership at this stage,
+ * as this should already have been decided.
  *
- * returns 1 if the files were linked, or are already linked, or cannot be
- * linked due to some problem, and 0 if the files are different.
+ * Returns 1 if the files were linked, or are
+ * already linked, or cannot be linked due to
+ * a problem, and 0 if the files are different.
  *
  * replace a b = TRUE, linked a b	(a and b are already linked)
  *               FALSE, ~ compare a b
@@ -545,46 +521,47 @@ register info_t *ilist;
  */
 static int
 replace(a, b)
-register info_t *a;
-register info_t *b;
+register Info *a;
+register Info *b;
 {
 	if (debug) {
 		puts("replace");
 	}
 
 	/*
-	 * if the inode numbers are identical, they are already
+	 * If the inode numbers are identical, they are already
 	 * linked, so return 1 as if we had linked them.
+	 * The device numbers must be the same to get this far.
 	 */
 	if (a->i_ino == b->i_ino) {
 		return(1);
 	}
 
 	/*
-	 * different contents; return false.
+	 * Different contents; return false.
 	 */
 	if (compare(a->i_name, b->i_name) != 0) {
 		return(0);
 	}
 
 	/*
-	 * if it doesn't work one way, try it the other.
+	 * If it doesn't work one way, try it the other.
 	 */
 	if (replace2(a->i_name, b->i_name) == 0) {
 		(void) replace2(b->i_name, a->i_name);
 	}
 
 	/*
-	 * return 1 here - it is irrelevant whether we succeeded or not.
+	 * Return 1 here - it is irrelevant whether we succeeded or not.
 	 */
 	return(1);
 }
 
 /*
- * this is the nasty bit; we musn't ever lose files here.
+ * This is the nasty bit; we musn't ever lose files here.
  *
- * replace the second filename with a link to the first.
- * returns 0 for failure, 1 for success, -1 for catastrophic
+ * Replace the second filename with a link to the first.
+ * Returns 0 for failure, 1 for success, -1 for catastrophic
  * failure (i.e. one of the files may have been lost)
  */
 static int
@@ -599,7 +576,7 @@ char *from, *to;
 	}
 
 	/*
-	 * if -n has been given, just print commands.
+	 * If -n has been given, just print commands.
 	 */
 	if (noexec) {
 		printf("link %s to %s\n", to, from);
@@ -607,7 +584,7 @@ char *from, *to;
 	}
 
 	/*
-	 * before we throw "to" away, relink it to a temporary file.
+	 * Before we throw "to" away, relink it to a temporary file.
 	 */
 	(void) time(&clock);
 	(void) sprintf(newname, "%s%4.4x%4.4x", to, getpid()&0xffff,
@@ -618,9 +595,9 @@ char *from, *to;
 	}
 
 	/*
-	 * set priority high so that anyone trying to access the files
+	 * Set priority high so that anyone trying to access the files
 	 * will be less likely to notice their disappearance.
-	 * we must be careful to lower it again afterwards.
+	 * We must be careful to lower it again afterwards.
 	 */
 	raisepriority();
 
@@ -633,7 +610,7 @@ char *from, *to;
 	}
 
 	/*
-	 * now try and link them together.
+	 * Now try and link them together.
 	 */
 	if (debug) {
 		puts("replace2 - linking");
@@ -654,19 +631,19 @@ char *from, *to;
 	}
 
 	/*
-	 * don't forget to lower the priority again.
+	 * Don't forget to lower the priority again.
 	 */
 	lowerpriority();
 
 	/*
-	 * this should never fail - we have only just created it.
+	 * This should never fail - we have only just created it.
 	 */
 	if (unlink(newname) == -1) {
 		error(1, "cannot remove temporary file %s", newname);
 	}
 
 	/*
-	 * only print out what we are doing when we have succeeded.
+	 * Only print out what we are doing when we have succeeded.
 	 */
 	if (verbose) {
 		printf("linking %s to %s\n", to, from);
@@ -676,21 +653,21 @@ char *from, *to;
 }
 
 /*
- * given a filename and the address of a header structure, fill it in with
+ * Given a filename and the address of a header structure, fill it in with
  * the size and a pointer to a new info structure, which is filled in with
  * the filename and inode number.
- * if file is a symbolic link, follow it if it is a file, or a directory
- * and the -s flag has been given.
- * returns NOFILE, ISDIR or NOTDIR as appropriate.
+ * If file is a symbolic link, only follow it if it is a file,
+ * or if it is a directory and the -s flag has been given.
+ * Returns NOFILE, ISDIR or NOTDIR as appropriate.
  */
 static int
 newinfo(filename, directory, headerp)
 register char *filename;
 register char *directory;
-register head_t *headerp;
+register Head *headerp;
 {
 	struct stat stbuf;
-	register info_t *infop;
+	register Info *infop;
 	register char *cp;
 
 	if (debug) {
@@ -758,7 +735,7 @@ register head_t *headerp;
 	/*
 	 * allocate memory for the new file info.
 	 */
-	infop = (info_t *) malloc(sizeof(info_t));
+	infop = (Info *) malloc(sizeof(Info));
 	if (infop == NULL) {
 		fatal("Out of memory");
 	}
@@ -783,12 +760,12 @@ register head_t *headerp;
 /*
  * return a new head structure, uninitialised.
  */
-static head_t *
+static Head *
 newhead()
 {
-	register head_t *hp;
+	register Head *hp;
 
-	hp = (head_t *) malloc(sizeof(head_t));
+	hp = (Head *) malloc(sizeof(Head));
 	if (hp == NULL)
 		fatal("Out of memory");
 
