@@ -18,10 +18,9 @@ takes as arguments a list of files to be rationalised.
 If any of these files is a directory, then the contents of that
 directory are added to the list of files to be rationalised, but
 .I rat
-will not normally recurse down more than one level;
-this may be overridden by use of the
+will not normally recurse down more than one level, unless the
 .B \-r
-flag.
+flag is specified.
 .PP
 Options are as follows:
 .TP
@@ -57,6 +56,10 @@ Normally,
 will only attempt to link files together if they have the
 same owner; this flag causes it to ignore ownership.
 This flag may not have any effect if you are not the superuser.
+.TP
+.BI \-f listfile
+Read the list of files or directories to be rationalised (one per line) from \fIlistfile\fP.
+If \fIlistfile\fP is specified as `-', standard input is read.
 .SH NOTES
 This command is potentially dangerous; you should make sure
 you fully understand the idea of links before you use it.
@@ -71,3 +74,4 @@ encounters a loop in the directory structure, it will loop
 forever without doing anything.
 .SH AUTHOR
 Chris Downey UKC September 1985.
+Ported to ANSI/POSIX Chris Downey Pfizer 1998.
