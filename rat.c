@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.1 1.1 (UKC) %G%";
+static char *sccsid = "@(#)rat.c	1.2 1.2 (UKC) %G%";
 #endif  lint
 
 /***
@@ -920,6 +920,27 @@ register int n;
 	while (n > 0 && *c1++ == *c2++)
 		--n;
 	return(n);
+}
+
+/*
+ * byte copy - copies count bytes from from to to.
+ */
+int
+bcopy(from, to, count)
+register char *from, *to;
+register int count;
+{
+	if (to < from) {
+		while (count-- > 0) {
+			*to++ = *from++;
+		}
+	} else {
+		to += count;
+		from += count;
+		while (count-- > 0) {
+			*--to = *--from;
+		}
+	}
 }
 
 /*
