@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.7 (C.M.Downey) %G%";
+static char *sccsid = "@(#)rat.c	1.8 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -73,10 +73,13 @@ static char *sccsid = "@(#)rat.c	1.7 (C.M.Downey) %G%";
  * Define NEWDIR if we have the new (4.2-style) directory-handling stuff.
  * otherwise, undefine NEWDIR so that the function enterdir() will use
  * the original unix directory structure.
+ *
+ * SunOS 3.5 apparently defines DIRSIZ instead of DIRBLKSIZ, so we
+ * test for either of these to see if we have the new dir stuff.
  */
 #include <sys/dir.h>
 
-#ifdef	DIRBLKSIZ
+#if	defined(DIRBLKSIZ) || defined(DIRSIZ)
 #	define	NEWDIR
 #else	DIRBLKSIZ
 #	undef	NEWDIR
