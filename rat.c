@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.2 1.2 (UKC) %G%";
+static char *sccsid = "@(#)rat.c	1.3 1.3 (UKC) %G%";
 #endif  lint
 
 /***
