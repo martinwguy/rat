@@ -1,0 +1,73 @@
+.TH RAT Local "29 September 1985"
+.UC 4
+.SH NAME
+rat \- rationalise files
+.SH SYNOPSIS
+.B rat
+[ -vnrsu ]
+[ files ] ...
+.SH DESCRIPTION
+.PP
+.I Rat
+``rationalises'' a given list of files by identifying those whose
+contents are identical and attempting to replace them with hard links,
+thus saving filespace.
+.PP
+.I Rat
+takes as arguments a list of files to be rationalised.
+If any of these files is a directory, then the contents of that
+directory are added to the list of files to be rationalised, but
+.I rat
+will not normally recurse down more than one level;
+this may be overridden by use of the
+.B \-r
+flag.
+.PP
+Options are as follows:
+.TP
+.B \-v
+Verbose mode; this causes
+.I rat
+to print the names of files which are being rationalised.
+.TP
+.B \-n
+This flag makes
+.I rat
+print the names of files which could be rationalised, but without
+actually doing so. It is analogous to the
+.B \-n
+option of
+.I make(1).
+.TP
+.B \-r
+Recursive mode.
+.I Rat
+will descend down through the directory heirarchy,
+adding all files encountered
+to the list of those to be rationalised.
+.TP
+.B \-s
+Follow symbolic links. This may be dangerous, so think
+carefully before you use it.
+.TP
+.B \-u
+Ignore ownership information.
+Normally,
+.I rat
+will only attempt to link files together if they have the
+same owner; this flag causes it to ignore ownership.
+This flag may not have any effect if you are not the superuser.
+.SH NOTES
+This command is potentially dangerous; you should make sure
+you fully understand the idea of links before you use it.
+.SH "SEE ALSO"
+ln(1), rm(1), link(2), rename(2), symlink(2), unlink(2).
+.SH BUGS
+If the
+.B \-s
+option is specified and
+.I rat
+encounters a loop in the directory structure, it will loop
+forever without doing anything.
+.SH AUTHOR
+Chris Downey UKC September 1985.
