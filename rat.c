@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.5 1.5 (C.M.Downey) %G%";
+static char *sccsid = "@(#)rat.c	1.6 1.6 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -156,6 +156,9 @@ static	int	compare();
 static	int	replace();
 static	int	replace2();
 
+static	void	raisepriority();
+static	void	lowerpriority();
+
 static	char	*mkpath();
 static	void	error();
 static	void	fatal();
@@ -170,6 +173,14 @@ extern	char	*strcpy();
  * name of program, for printing error messages.
  */
 char	*progname;
+
+/*
+ * stuff for raising and lowering priority.
+ */
+#define	PRIORITY	-5		/* how much to raise priority by */
+
+static	int	niceness = 0;		/* current priority */
+static	int	our_uid = -1;		/* our user id */
 
 /*
  * global option variables.
@@ -606,10 +617,18 @@ char *from, *to;
 		puts("replace2 - creating save file");
 	}
 
+	/*
+	 * set priority high so that anyone trying to access the files
+	 * will be less likely to notice their disappearance.
+	 * we must be careful to lower it again afterwards.
+	 */
+	raisepriority();
+
 	if (rename(to, newname) == -1) {	/* cannot save file */
 		if (debug) {
 			error(1, "rename('%s', '%s')", to, newname);
 		}
+		lowerpriority();
 		return(0);
 	}
 
@@ -625,12 +644,19 @@ char *from, *to;
 			if (debug) {
 				error(1, "rename(%s, %s)", newname, to);
 			}
+			lowerpriority();
 			return(0);
 		} else {
 			error(1, "failed to link %s to %s - copy has been left on %s\n", to, from, newname);
+			lowerpriority();
 			return(-1);
 		}
 	}
+
+	/*
+	 * don't forget to lower the priority again.
+	 */
+	lowerpriority();
 
 	/*
 	 * this should never fail - we have only just created it.
@@ -823,6 +849,35 @@ char *file1, *file2;
 	(void) close(fd2);
 
 	return(retval);
+}
+
+/*
+ * raise process priority for critical code.
+ * note that if we are already running at a high priority,
+ * this may slow us down slightly between critical sections.
+ */
+static void
+raisepriority()
+{
+	if (our_uid == -1) {
+		our_uid = geteuid();
+	}
+	if (our_uid == 0) {
+		(void) nice(PRIORITY);
+		niceness += PRIORITY;
+	}
+}
+
+/*
+ * put the priority back where it was.
+ */
+static void
+lowerpriority()
+{
+	if (our_uid == 0) {
+		nice(-niceness);
+		niceness = 0;
+	}
 }
 
 /*
