@@ -1,5 +1,5 @@
 #ifndef lint
-static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
+static char *sccsid = "@(#)rat.c	1.5 1.5 (C.M.Downey) %G%";
 #endif  lint
 
 /***
@@ -44,6 +44,9 @@ static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
 	For safety reasons, we create a temporary link to each file before
 	we unlink it; then if the link fails, the original is replaced.
 
+	Note that allocated space is never freed; this is unnecessary, since
+	by the time we have started using it, we will never need any more.
+
 * switches:
 	-v	verbose; print names of files rationalised.
 	-n	don't do any linking; just print names.
@@ -52,10 +55,9 @@ static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
 	-u	ignore ownership of files.
 * libraries used:
 	standard
-	-lndir on pre-4.2 systems
 * environments:
-	Berkeley 4.2BSD VMUNIX.
-	Berkeley 4.1BSD VMUNIX.
+	Berkeley VAX 4.2BSD VMUNIX.
+	Berkeley Orion 4.1BSD VMUNIX.
 * history:
 	Chris Downey UKC August 1985
 
@@ -71,32 +73,27 @@ static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
  * define NEWDIR if we have the new (4.2-style) directory-handling stuff.
  * otherwise, undefine NEWDIR so that the function enterdir() will use
  * the original unix directory structure.
- *
- * define ndir if you have the "ndir.h" emulation of the 4.2 library
- * stuff, but don't define it for systems that have the real thing.
  */
-#ifdef	ndir
-#include <ndir.h>
-#else	ndir
 #include <sys/dir.h>
-#endif	ndir
 
 #ifdef	DIRBLKSIZ
-#define	NEWDIR
+#	define	NEWDIR
 #else	DIRBLKSIZ
-#undef	NEWDIR
+#	undef	NEWDIR
 #endif	DIRBLKSIZ
 
 
 /*
  * if O_RDONLY isn't defined, we assume this is a pre-4.2 system.
- * we will therefore need our own bcmp() or rename() library functions.
+ * we will therefore need our own bcmp() and rename() library functions.
  */
 #ifndef	O_RDONLY
-#define	O_RDONLY	0
-#undef	BSD42
+#	define	O_RDONLY	0
+#	define	BCMP
+#	define	RENAME
 #else	O_RDONLY
-#define	BSD42
+#	undef	BCMP
+#	undef	RENAME
 #endif	O_RDONLY
 
 
@@ -104,13 +101,13 @@ static char *sccsid = "@(#)rat.c	1.4 1.4 (UKC) %G%";
  * symbolic link handling is only available if there are any to handle.
  */
 #ifdef	S_IFLNK
-#define	USAGE	"usage: rat [-vnrsu] files\n"
+#	define	USAGE	"usage: rat [-vnrsu] files\n"
 #else	S_IFLNK
-#define	USAGE	"usage: rat [-vnru] files\n"
+#	define	USAGE	"usage: rat [-vnru] files\n"
 #endif	S_IFLNK
 
 
-#define ISDIR	1			/* return values from functions */
+#define ISDIR	1			/* miscellaneous return values */
 #define NOTDIR	0
 #define NOFILE	-1
 
@@ -141,7 +138,6 @@ typedef struct header {
 	short	h_uid;			/* ownership */
 } head_t;
 
-
 /*
  * internal function declarations.
  */
@@ -164,13 +160,11 @@ static	char	*mkpath();
 static	void	error();
 static	void	fatal();
 
-
 /*
  * library function declarations.
  */
 extern	char	*malloc();
 extern	char	*strcpy();
-
 
 /*
  * name of program, for printing error messages.
@@ -190,7 +184,6 @@ static	int	ignore = 0;		/* ignore ownership of files */
 static	int	debug = 0;		/* debugging level */
 
 static	char	*dot = ".";		/* default if no files given */
-
 
 main(argc, argv)
 int argc;
@@ -237,11 +230,17 @@ char *argv[];
 	/*
 	 * read all the files into an associativity list, and then
 	 * apply "combine" to each equivalence class in turn.
+	 * current directory is default.
 	 */
-	if (argc == 0) {		/* current directory is default */
-		apply(combine, associate(1, &dot));
-	} else {
-		apply(combine, associate(argc, argv));
+	{
+		register head_t *list;
+
+		if (argc == 0) {
+			list = associate(1, &dot);
+		} else {
+			list = associate(argc, argv);
+		}
+		apply(combine, list);
 	}
 
 	/*
@@ -256,14 +255,14 @@ char *argv[];
  */
 static void
 apply(func, list)
-register void (*func)();
-register head_t *list;
+register void (*func)();		/* function to apply */
+register head_t *list;			/* list to be operated on */
 {
 	if (debug) {
 		puts("apply");
 	}
 
-	while (list != (head_t *) 0) {
+	while (list != NULL) {
 		(*func)(list->h_info);
 		list = list->h_next;
 	}
@@ -271,6 +270,7 @@ register head_t *list;
 
 /*
  * associate the given vector of filenames into a list of lists of info_t.
+ * return the list.
  */
 static head_t *
 associate(argc, argv)
@@ -278,13 +278,17 @@ int argc;
 char *argv[];
 {
 	register int count;		/* loop counter */
-	head_t *list = (head_t *) 0;	/* pointer to linked list */
+	head_t *list = NULL;		/* pointer to linked list */
 
 	if (debug) {
 		puts("associate");
 	}
 
 	for (count = 0; count < argc; count++) {
+		/*
+		 * if we encounter a directory,
+		 * call enterdir to handle it.
+		 */
 		if (enter(argv[count], ".", &list) == ISDIR) {
 			list = enterdir(argv[count], list);
 		}
@@ -294,8 +298,9 @@ char *argv[];
 }
 
 /*
- * given a directory name and a linked list, add the files within the directory
- * to the list. recurse if directories are encountered and "-r" has been given.
+ * given a directory name and a linked list, add the files within
+ * the directory to the list, and return the new list.
+ * recurse if directories are encountered and "-r" has been given.
  */
 static head_t *
 enterdir(dirname, list)
@@ -344,8 +349,8 @@ head_t *list;
 		}
 
 		/*
-		 * if we encounter a directory, ignore it, unless
-		 * the -r flag has been given.
+		 * if we encounter a directory, ignore it,
+		 * unless the -r flag has been given.
 		 */
 		if (enter(dp->d_name, dirname, &list) == ISDIR && recursive) {
 			list = enterdir(mkpath(dirname, dp->d_name), list);
@@ -365,10 +370,12 @@ head_t *list;
 }
 
 /*
- * enter the file in the given associativity list. a file may be entered in an
- * existing class only if its size, device number and ownership are the same.
- * returns NOTDIR for successfully entered files, ISDIR for directories.
- * side-effects *listp.
+ * enter the file in the given associativity list.
+ * a file may be entered in an existing class only
+ * if its size, device number and ownership are the same.
+ * returns ISDIR if a directory is encountered, and
+ * NOTDIR for successfully entered files.
+ * side-effects *listp.	(NASTY).
  */
 static int
 enter(filename, directory, listp)
@@ -401,11 +408,14 @@ head_t **listp;
 /*
  * given a reference to a file, and an associativity list, enter the
  * file in an appropriate equivalence class.
+ *
+ * we have to return the list we are given, in case it is empty to
+ * start with and we create a new element.
  */
 static head_t *
 assoc(hp, list)
-head_t *hp;
-head_t *list;
+head_t *hp;				/* file to be entered */
+head_t *list;				/* list to put it in */
 {
 	register head_t *hptr;		/* temp header structure */
 
@@ -418,24 +428,26 @@ head_t *list;
 	 * all elements are initialised, including h_next, since
 	 * this *must* be zero.
 	 */
-	if (list == (head_t *) 0) {
-		hptr = newhead();
+	if (list == NULL) {
+		hptr = newhead();	/* NASTY */
 		hptr->h_info = hp->h_info;
 		hptr->h_size = hp->h_size;
 		hptr->h_dev = hp->h_dev;
 		hptr->h_uid = hp->h_uid;
-		hptr->h_next = (head_t *) 0;
+		hptr->h_next = NULL;
 		return(hptr);
 	}
 
 	/*
 	 * if the file will fit into this class, insert it and return list.
 	 */
-	if (hp->h_size == list->h_size && hp->h_dev == list->h_dev &&
-				(ignore || hp->h_uid == list->h_uid)) {
+	if (hp->h_size == list->h_size &&
+	     hp->h_dev == list->h_dev &&
+	    (ignore || hp->h_uid == list->h_uid)) {
 		if (debug) {
-			printf("associating %s with %s\n", list->h_info->i_name,
-							hp->h_info->i_name);
+			printf("associating %s with %s\n",
+						list->h_info->i_name,
+						hp->h_info->i_name);
 		}
 		hp->h_info->i_next = list->h_info;
 		list->h_info = hp->h_info;
@@ -464,18 +476,18 @@ head_t *list;
  */
 static void
 combine(list)
-info_t *list;
+register info_t *list;
 {
 	if (debug) {
 		puts("combine");
 	}
 
-	if (list == (info_t *) 0)
+	if (list == NULL)
 		return;
 
 	do {
 		list = comb2(list, list->i_next);
-	} while (list != (info_t *) 0);
+	} while (list != NULL);
 }
 
 /*
@@ -487,14 +499,15 @@ info_t *list;
  */
 static info_t *
 comb2(elem, ilist)
-register info_t *elem, *ilist;
+register info_t *elem;
+register info_t *ilist;
 {
 	if (debug) {
 		puts("comb2");
 	}
 
-	if (ilist == (info_t *) 0) {
-		return((info_t *) 0);
+	if (ilist == NULL) {
+		return(NULL);
 	}
 
 	if (replace(elem, ilist)) {
@@ -516,12 +529,13 @@ register info_t *elem, *ilist;
  *
  * replace a b = TRUE, linked a b	(a and b are already linked)
  *               FALSE, ~ compare a b
- *               TRUE, replace2 a b \/ replace2 b a
+ *               TRUE, replace2 a b \/ replace2 b a	(side-effect)
  *               TRUE
  */
 static int
 replace(a, b)
-info_t *a, *b;
+register info_t *a;
+register info_t *b;
 {
 	if (debug) {
 		puts("replace");
@@ -645,9 +659,9 @@ char *from, *to;
  */
 static int
 newinfo(filename, directory, headerp)
-char *filename;
-char *directory;
-head_t *headerp;
+register char *filename;
+register char *directory;
+register head_t *headerp;
 {
 	struct stat stbuf;
 	register info_t *infop;
@@ -719,7 +733,7 @@ head_t *headerp;
 	 * allocate memory for the new file info.
 	 */
 	infop = (info_t *) malloc(sizeof(info_t));
-	if (infop == (info_t *) 0) {
+	if (infop == NULL) {
 		fatal("Out of memory");
 	}
 
@@ -729,8 +743,9 @@ head_t *headerp;
 	 */
 	infop->i_name = cp;
 	infop->i_ino = stbuf.st_ino;
-	infop->i_next = (info_t *) 0;
-	infop->i_dir = (char *) 0;
+	infop->i_next = NULL;
+	infop->i_dir = NULL;
+
 	headerp->h_size = stbuf.st_size;
 	headerp->h_dev = stbuf.st_dev;
 	headerp->h_uid = stbuf.st_uid;
@@ -748,7 +763,7 @@ newhead()
 	register head_t *hp;
 
 	hp = (head_t *) malloc(sizeof(head_t));
-	if (hp == (head_t *) 0)
+	if (hp == NULL)
 		fatal("Out of memory");
 
 	return(hp);
@@ -789,7 +804,7 @@ char *file1, *file2;
 		n2 = read(fd2, buf2, sizeof(buf2));
 		if (n1 != n2) {
 			/*
-			 * files must be different sizes.
+			 * files are different sizes.
 			 */
 			retval = 1;
 			break;
@@ -824,7 +839,7 @@ char *dir, *file;
 	/*
 	 * if dir is "." or file begins with a slash, just use filename.
 	 */
-	if (dir == (char *) 0 || dir[0] == '\0'		/* null path */
+	if (dir == NULL || dir[0] == '\0'		/* null path */
 	  || (dir[0] == '.' && dir[1] == '\0')		/* path is "." */
 	  || file[0] == '/') {				/* file is absolute */
 		opt = 1;
@@ -902,7 +917,7 @@ char *a, *b, *c, *d, *e;
 	exit(-1);
 }
 
-#ifndef	BSD42
+#ifdef	BCMP
 /*
  * byte compare - return zero for identical buffers, non-zero otherwise.
  */
@@ -915,31 +930,12 @@ register int n;
 		--n;
 	return(n);
 }
-
-/*
- * byte copy - copies count bytes from from to to.
- */
-int
-bcopy(from, to, count)
-register char *from, *to;
-register int count;
-{
-	if (to < from) {
-		while (count-- > 0) {
-			*to++ = *from++;
-		}
-	} else {
-		to += count;
-		from += count;
-		while (count-- > 0) {
-			*--to = *--from;
-		}
-	}
-}
+#endif	BCMP
 
 /*
  * rename file "from" to "to".
  */
+#ifdef	RENAME
 int
 rename(from, to)
 char *from, *to;
@@ -949,4 +945,4 @@ char *from, *to;
 	}
 	return(unlink(from));
 }
-#endif	BSD42
+#endif	RENAME
