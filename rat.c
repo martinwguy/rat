@@ -1,7 +1,3 @@
-#ifndef lint
-static char *sccsid = "@(#)rat.c	1.10 (C.M.Downey) %G%";
-#endif  lint
-
 /***
 
 * program name:
@@ -76,6 +72,7 @@ static char *sccsid = "@(#)rat.c	1.10 (C.M.Downey) %G%";
 #include <fcntl.h>			/* for opening files */
 #include <errno.h>			/* for error messages */
 #include <stdarg.h>
+#include <time.h>			/* for time() */
 
 /*
  * This code ported to POSIX from ancient BSD-style cmd Pfizer Sandwich 1/5/98.
