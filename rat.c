@@ -49,6 +49,8 @@
 	-r	recurse down through directories. (careful here)
 	-s	follow symbolic links. (not on pre-4.2) (very careful here)
 	-u	ignore ownership of files.
+	-g	ignore group ownership of files.
+	-p	ignore permissions of files.
 	-f file	specify file containing filenames to rationalize; '-' means stdin
 * libraries used:
 	standard
@@ -82,7 +84,7 @@
 /*
  * Symbolic link handling is only available if there are any to handle.
  */
-#define	USAGE	"usage: rat [-vnrsu] [ file ... | -f listfile ]\n"
+#define	USAGE	"usage: rat [-vnrsugp] [ file ... | -f listfile ]\n"
 
 
 #define ISDIR		1		/* miscellaneous return values */
@@ -113,6 +115,8 @@ typedef struct header {
 	off_t		h_size;		/* size of files */
 	dev_t		h_dev;		/* device number */
 	uid_t		h_uid;		/* ownership */
+	gid_t		h_gid;		/* group ownership */
+	uid_t		h_perms;	/* permissions */
 } Head;
 
 /*
@@ -159,7 +163,9 @@ static	uid_t	our_uid = -1;		/* our user id */
 static	int	verbose = 0;		/* print names of files rationalised */
 static	int	noexec = 0;		/* don't actually do anything */
 static	int	recursive = 0;		/* recurse down through directories */
-static	int	ignore = 0;		/* ignore ownership of files */
+static	int	ignore_uid = 0;		/* ignore ownership of files */
+static	int	ignore_gid = 0;		/* ignore group ownership of files */
+static	int	ignore_perms = 0;	/* ignore permissions of files */
 static	int	debug = 0;		/* debugging level */
 
 static	int	symbolic = 0;		/* follow symlinks to directories */
@@ -204,7 +210,15 @@ main(int argc, char *argv[])
 		break;
 
 	    case 'u':		/* ignore ownership info */
-		ignore = 1;
+		ignore_uid = 1;
+		break;
+
+	    case 'g':		/* ignore group ownership info */
+		ignore_gid = 1;
+		break;
+
+	    case 'p':		/* ignore permissions info */
+		ignore_perms = 1;
 		break;
 
 	    case 'f':		/* read list of filenames from file */
@@ -384,7 +398,7 @@ Head *list;
 /*
  * Enter the file in the given associativity list.
  * A file may be entered in an existing class only
- * if its size, device number and ownership are the same.
+ * if its size, device number, ownership and permissions are the same.
  * Returns ISDIR if a directory is encountered,
  * and NOTDIR for successfully entered files.
  * Side-effects *listp.	(NASTY).
@@ -443,7 +457,9 @@ Head *list;				/* list to put it in */
 		 */
 		if (hp->h_size == listp->h_size &&
 		     hp->h_dev == listp->h_dev &&
-		    (ignore || hp->h_uid == listp->h_uid)) {
+		    (ignore_uid || hp->h_uid == listp->h_uid) &&
+		    (ignore_gid || hp->h_gid == listp->h_gid) &&
+		    (ignore_perms || hp->h_perms == listp->h_perms)) {
 
 			if (debug) {
 				(void) printf("associating %s with %s\n",
@@ -467,6 +483,8 @@ Head *list;				/* list to put it in */
 	hptr->h_size = hp->h_size;
 	hptr->h_dev = hp->h_dev;
 	hptr->h_uid = hp->h_uid;
+	hptr->h_gid = hp->h_gid;
+	hptr->h_perms = hp->h_perms;
 	hptr->h_next = list;
 	return(hptr);
 }
@@ -759,6 +777,8 @@ register Head *headerp;
 	headerp->h_size = stbuf.st_size;
 	headerp->h_dev = stbuf.st_dev;
 	headerp->h_uid = stbuf.st_uid;
+	headerp->h_gid = stbuf.st_gid;
+	headerp->h_perms = stbuf.st_mode & ALLPERMS;
 	headerp->h_info = infop;
 
 	return(0);

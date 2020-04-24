@@ -50,12 +50,18 @@ Follow symbolic links. This may be dangerous, so think
 carefully before you use it.
 .TP
 .B \-u
-Ignore ownership information.
+Ignore file ownership.
 Normally,
 .I rat
 will only attempt to link files together if they have the
-same owner; this flag causes it to ignore ownership.
+same owner, group and permissions; this flag causes it to ignore ownership.
 This flag may not have any effect if you are not the superuser.
+.TP
+.B \-g
+Ignore group ownership.
+.TP
+.B \-p
+Ignore file permissions.
 .TP
 .BI \-f \ listfile
 Read the list of files or directories to be rationalised (one per line) from \fIlistfile\fP.
@@ -76,3 +82,4 @@ forever without doing anything.
 Chris Downey UKC September 1985.
 Ported to ANSI/POSIX Chris Downey Pfizer 1998.
 Updated to Linux Martin Guy <martinwguy@gmail.com> 2020.
+Added group and permissions Martin Guy <martinwguy@gmail.com> 2020.
