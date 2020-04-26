@@ -33,9 +33,9 @@
 	file, or when they have been compared with every other file. This
 	process repeats until the list contains less than two items.
 
-	If we fail to link one file to another, we try again in the other
-	direction.  E.g. if, say, we cannot unlink "bar", then we unlink
-	"foo" and link it to "bar" instead.
+	If either of the files to link together already has multiple links,
+	we delete the one with the lower link count and keep the one with
+	more links.
 
 	For safety reasons, we create a temporary link to each file before
 	we unlink it; then if the link fails, the original is replaced.
@@ -554,6 +554,8 @@ replace(a, b)
 Info *a;
 Info *b;
 {
+	struct stat stbuf_a, stbuf_b;
+
 	if (debug) {
 		(void) puts("replace");
 	}
@@ -575,10 +577,20 @@ Info *b;
 	}
 
 	/*
-	 * If it doesn't work one way, try it the other.
+	 * Delete and replace the file with the lower link count.
 	 */
-	if (replace2(a->i_name, b->i_name) == 0) {
-		(void) replace2(b->i_name, a->i_name);
+	if (lstat(a->i_name, &stbuf_a) == -1) {
+		fprintf(stderr, "Cannot restat %s\n", a->i_name);
+		return(0);
+	}
+	if (lstat(b->i_name, &stbuf_b) == -1) {
+		fprintf(stderr, "Cannot restat %s\n", b->i_name);
+		return(0);
+	}
+	if (stbuf_b.st_nlink <= stbuf_a.st_nlink) {
+		replace2(a->i_name, b->i_name);
+	} else {
+		replace2(b->i_name, a->i_name);
 	}
 
 	/*
