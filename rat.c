@@ -51,6 +51,7 @@
 	-u	ignore ownership of files.
 	-g	ignore group ownership of files.
 	-p	ignore permissions of files.
+	-z	Don't link zero-length files together.
 	-f file	specify file containing filenames to rationalize; '-' means stdin
 * libraries used:
 	standard
@@ -84,7 +85,7 @@
 /*
  * Symbolic link handling is only available if there are any to handle.
  */
-#define	USAGE	"usage: rat [-vnrsugp] [ file ... | -f listfile ]\n"
+#define	USAGE	"usage: rat [-vnrsugpz] [ file ... | -f listfile ]\n"
 
 
 #define ISDIR		1		/* miscellaneous return values */
@@ -166,6 +167,7 @@ static	int	recursive = 0;		/* recurse down through directories */
 static	int	ignore_uid = 0;		/* ignore ownership of files */
 static	int	ignore_gid = 0;		/* ignore group ownership of files */
 static	int	ignore_perms = 0;	/* ignore permissions of files */
+static	int	ignore_empty = 0;	/* ignore empty files */
 static	int	debug = 0;		/* debugging level */
 
 static	int	symbolic = 0;		/* follow symlinks to directories */
@@ -219,6 +221,10 @@ main(int argc, char *argv[])
 
 	    case 'p':		/* ignore permissions info */
 		ignore_perms = 1;
+		break;
+
+	    case 'z':		/* ignore empty files */
+		ignore_empty = 1;
 		break;
 
 	    case 'f':		/* read list of filenames from file */
@@ -765,6 +771,14 @@ register Head *headerp;
 		break;
 
 	default:				/* special file */
+		free(cp);
+		return(NOSUCHFILE);
+	}
+
+	/*
+	 * ignore empty files, if that's what they asked for
+	 */
+	if (ignore_empty && stbuf.st_size == 0) {
 		free(cp);
 		return(NOSUCHFILE);
 	}

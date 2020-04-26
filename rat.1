@@ -4,8 +4,8 @@
 rat \- rationalise files
 .SH SYNOPSIS
 .B rat
-[ -vnrsu ]
-[ files ] ...
+[ -vnrsugpz ]
+[ files ... | -f \fIlistfile\fP ]
 .SH DESCRIPTION
 .PP
 .I Rat
@@ -62,6 +62,9 @@ Ignore group ownership.
 .TP
 .B \-p
 Ignore file permissions.
+.TP
+.B \-z
+Don't link zero-length files together.
 .TP
 .BI \-f \ listfile
 Read the list of files or directories to be rationalised (one per line) from \fIlistfile\fP.
